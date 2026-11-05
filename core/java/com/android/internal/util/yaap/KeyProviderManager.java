@@ -37,6 +37,12 @@ public final class KeyProviderManager {
         return getProvider().hasKeybox();
     }
 
+    public static boolean isRsaKeyboxAvailable() {
+        IKeyboxProvider provider = getProvider();
+        return provider.getRsaPrivateKey() != null
+                && provider.getRsaCertificateChain().length > 0;
+    }
+
     private static class DefaultKeyboxProvider implements IKeyboxProvider {
         private final Map<String, String> keyboxData = new HashMap<>();
 
@@ -163,13 +169,7 @@ public final class KeyProviderManager {
 
         @Override
         public boolean hasKeybox() {
-            if (!keyboxData.containsKey("EC.PRIV") || !keyboxData.containsKey("RSA.PRIV")) {
-                return false;
-            }
-            if (!keyboxData.containsKey("EC.CERT_1") || !keyboxData.containsKey("RSA.CERT_1")) {
-                return false;
-            }
-            return true;
+            return keyboxData.containsKey("EC.PRIV") && keyboxData.containsKey("EC.CERT_1");
         }
 
         @Override

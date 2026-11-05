@@ -70,6 +70,10 @@ public class KeyboxImitationHooks {
             return null;
         }
 
+        if (params.algorithm == Algorithm.RSA && !KeyProviderManager.isRsaKeyboxAvailable()) {
+            return null;
+        }
+
         int uid = Binder.getCallingUid();
         try {
             List<Certificate> chain = KeyboxChainGenerator.generateCertChain(uid, descriptor, params);
