@@ -20,12 +20,14 @@ import android.app.Application;
 import android.content.Context;
 import android.content.res.Resources;
 import android.os.Build;
+import android.os.SystemProperties;
 import android.util.Log;
 
 import com.android.internal.R;
 
 import java.lang.reflect.Field;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -39,6 +41,12 @@ public final class PixelPropsUtils {
     private static final String PACKAGE_GMS = "com.google.android.gms";
     private static final String PROCESS_GMS_UNSTABLE = PACKAGE_GMS + ".unstable";
     private static final String VERSION_PREFIX = "VERSION.";
+    private static final String APPCOMPAT_OVERRIDE_PREFIX = "ro.appcompat_override.";
+
+    private static final String[] PARTITIONS = {
+        "", "bootimage.", "odm.", "odm_dlkm.", "product.", "system.",
+        "system_dlkm.", "system_ext.", "vendor.", "vendor_dlkm."
+    };
 
     private static final Field OFFSET_FIELD;
     private static final Unsafe UNSAFE;
@@ -72,6 +80,7 @@ public final class PixelPropsUtils {
     );
 
     private static volatile boolean sIsEnabled = false;
+    private static boolean sOverridesPublished = false;
 
     private static PixelPropsUtils sInstance = null;
 
@@ -207,6 +216,98 @@ public final class PixelPropsUtils {
 
     public static boolean getIsEnabled() {
         return sIsEnabled;
+    }
+
+    /**
+     * Whether zygote should turn on the appcompat sysprop overrides for a new
+     * process. Only DroidGuard gets them, and only once they hold the
+     * certified values.
+     */
+    public static boolean shouldOverrideSysprops(Context context, String processName) {
+        if (!PROCESS_GMS_UNSTABLE.equals(processName)) {
+            return false;
+        }
+        synchronized (PixelPropsUtils.class) {
+            if (!sOverridesPublished) {
+                sOverridesPublished = publishAppcompatOverrides(context);
+            }
+        }
+        return sOverridesPublished;
+    }
+
+    private static boolean publishAppcompatOverrides(Context context) {
+        final PixelPropsUtils ppu = getInstance(context);
+        if (ppu == null || !sIsEnabled) {
+            return false;
+        }
+        final Map<String, String> overrides = ppu.nativeProps();
+        int published = 0;
+        for (Map.Entry<String, String> entry : overrides.entrySet()) {
+            final String name = entry.getKey();
+            final String value = entry.getValue();
+            final String real = SystemProperties.get(name, "");
+            if (value == null || value.isEmpty() || real.isEmpty() || real.equals(value)) {
+                continue;
+            }
+            final String overrideName = APPCOMPAT_OVERRIDE_PREFIX + name;
+            final String current = SystemProperties.get(overrideName, "");
+            if (current.equals(value)) {
+                published++;
+                continue;
+            }
+            if (!current.isEmpty()) {
+                Logger.e("Override for " + name + " already holds another value",
+                        new IllegalStateException());
+                continue;
+            }
+            try {
+                SystemProperties.set(overrideName, value);
+                published++;
+            } catch (Exception e) {
+                Logger.e("Failed to override " + name, e);
+            }
+        }
+        Logger.d("Published " + published + " appcompat overrides");
+        return published > 0;
+    }
+
+    private Map<String, String> nativeProps() {
+        final Map<String, String> props = new LinkedHashMap<>();
+        final String fp = (String) certifiedProps.get("FINGERPRINT");
+        final String id = (String) certifiedProps.get("ID");
+        final String release = (String) certifiedProps.get(VERSION_PREFIX + "RELEASE");
+        final String incremental = (String) certifiedProps.get(VERSION_PREFIX + "INCREMENTAL");
+        final String product = (String) certifiedProps.get("PRODUCT");
+
+        for (String partition : PARTITIONS) {
+            final String build = "ro." + partition + "build.";
+            props.put(build + "fingerprint", fp);
+            props.put(build + "id", id);
+            props.put(build + "version.release", release);
+            props.put(build + "version.release_or_codename", release);
+            props.put(build + "version.incremental", incremental);
+            props.put(build + "type", "user");
+            props.put(build + "tags", "release-keys");
+
+            final String productPrefix = "ro.product." + partition;
+            props.put(productPrefix + "brand", (String) certifiedProps.get("BRAND"));
+            props.put(productPrefix + "manufacturer",
+                    (String) certifiedProps.get("MANUFACTURER"));
+            props.put(productPrefix + "model", (String) certifiedProps.get("MODEL"));
+            props.put(productPrefix + "device", (String) certifiedProps.get("DEVICE"));
+            props.put(productPrefix + "name", product);
+        }
+
+        final String spl = (String) certifiedProps.get(VERSION_PREFIX + "SECURITY_PATCH");
+        props.put("ro.build.version.security_patch", spl);
+        props.put("ro.vendor.build.security_patch", spl);
+        props.put("ro.product.first_api_level",
+                String.valueOf(certifiedProps.get(VERSION_PREFIX + "DEVICE_INITIAL_SDK_INT")));
+        props.put("ro.build.description", product + "-user " + release + " " + id + " "
+                + incremental + " release-keys");
+        props.put("ro.build.flavor", product + "-user");
+        props.put("ro.debuggable", "0");
+        return props;
     }
 
     private static class Logger {

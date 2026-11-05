@@ -169,6 +169,7 @@ import com.android.internal.app.ProcessMap;
 import com.android.internal.os.Zygote;
 import com.android.internal.util.ArrayUtils;
 import com.android.internal.util.MemInfoReader;
+import com.android.internal.util.yaap.PixelPropsUtils;
 import com.android.server.AppStateTracker;
 import com.android.server.LocalServices;
 import com.android.server.ServiceThread;
@@ -2612,6 +2613,9 @@ public final class ProcessList extends ProcessListInternal
                         break;
                     }
                 }
+            }
+            if (PixelPropsUtils.shouldOverrideSysprops(mService.mContext, app.processName)) {
+                bindOverrideSysprops = true;
             }
 
             AppStateTracker ast = mService.mServices.mAppStateTracker;
