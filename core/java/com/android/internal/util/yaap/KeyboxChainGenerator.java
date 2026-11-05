@@ -7,6 +7,7 @@ package com.android.internal.util.yaap;
 import android.app.ActivityThread;
 import android.content.Context;
 import android.content.pm.PackageInfo;
+import android.content.pm.FeatureInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
 import android.hardware.security.keymint.Algorithm;
@@ -291,9 +292,10 @@ public final class KeyboxChainGenerator {
     }
 
     private static ASN1OctetString getAsn1OctetString(ASN1Encodable[] teeEnforcedEncodables, ASN1Encodable[] softwareEnforcedEncodables, KeyGenParameters params) throws IOException {
-        ASN1Integer attestationVersion = new ASN1Integer(100);
+        int keyMintVersion = getKeyMintVersion();
+        ASN1Integer attestationVersion = new ASN1Integer(keyMintVersion);
         ASN1Enumerated attestationSecurityLevel = new ASN1Enumerated(1);
-        ASN1Integer keymasterVersion = new ASN1Integer(100);
+        ASN1Integer keymasterVersion = new ASN1Integer(keyMintVersion);
         ASN1Enumerated keymasterSecurityLevel = new ASN1Enumerated(1);
         ASN1OctetString attestationChallenge = new DEROctetString(params.attestationChallenge);
         ASN1OctetString uniqueId = new DEROctetString(new byte[0]);
@@ -306,6 +308,18 @@ public final class KeyboxChainGenerator {
         ASN1Sequence keyDescriptionHackSeq = new DERSequence(keyDescriptionEncodables);
 
         return new DEROctetString(keyDescriptionHackSeq);
+    }
+
+    private static int getKeyMintVersion() {
+        Context context = ActivityThread.currentApplication();
+        if (context != null) {
+            for (FeatureInfo info : context.getPackageManager().getSystemAvailableFeatures()) {
+                if (PackageManager.FEATURE_HARDWARE_KEYSTORE.equals(info.name) && info.version > 0) {
+                    return info.version;
+                }
+            }
+        }
+        return 100;
     }
 
     private static DEROctetString createApplicationId(int uid) throws Throwable {
